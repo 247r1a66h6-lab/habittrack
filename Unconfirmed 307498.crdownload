@@ -1,0 +1,384 @@
+
+const KEY = "habitflow_habits_v1";
+
+const icons = {
+  Health: "♡",
+  Learning: "✎",
+  Mindfulness: "☼",
+  Productivity: "✦",
+  Personal: "❋"
+};
+
+const quotes = [
+  "Progress is progress, no matter how small.",
+  "Small steps every day lead to big changes.",
+  "Don't aim for perfect. Aim for consistent.",
+  "Your future is created by what you do today.",
+  "Every new day is another chance to grow."
+];
+
+const todayKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+};
+
+const id = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+
+function load() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY));
+    if (saved && Array.isArray(saved.habits)) return saved;
+  } catch (e) {}
+  return { habits: [
+    {id:id(),name:"Drink 8 glasses of water",category:"Health",frequency:"Daily",note:"Take care of yourself",logs:{}},
+    {id:id(),name:"Read for 15 minutes",category:"Learning",frequency:"Daily",note:"Learn something new",logs:{}},
+    {id:id(),name:"Exercise for 20 minutes",category:"Health",frequency:"Daily",note:"Keep moving",logs:{}},
+    {id:id(),name:"Practice mindfulness",category:"Mindfulness",frequency:"Daily",note:"Pause and breathe",logs:{}}
+  ]};
+}
+
+let data = load();
+let editing = null;
+let toastTimer;
+
+function save() {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(data));
+    render();
+  } catch (e) {
+    notify("Unable to save. Check your browser storage.");
+  }
+}
+
+function safe(text="") {
+  return String(text).replace(/[&<>"']/g, c => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  })[c]);
+}
+
+function done(h, date=todayKey()) {
+  return Boolean(h.logs && h.logs[date]);
+}
+
+function eligible(h, date=new Date()) {
+  const day = date.getDay();
+  if (h.frequency === "Weekdays" && (day===0 || day===6)) return false;
+  if (h.frequency === "Weekends" && day!==0 && day!==6) return false;
+  return true;
+}
+
+function scheduled() {
+  return data.habits.filter(h => eligible(h));
+}
+
+function streak(h) {
+  let count = 0;
+  const d = new Date();
+  d.setHours(12,0,0,0);
+
+  if (!done(h, dateString(d))) d.setDate(d.getDate()-1);
+
+  for (let i=0; i<366; i++) {
+    if (!eligible(h,d)) {
+      d.setDate(d.getDate()-1);
+      continue;
+    }
+    if (!done(h,dateString(d))) break;
+    count++;
+    d.setDate(d.getDate()-1);
+  }
+  return count;
+}
+
+function dateString(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+function offsetDate(n) {
+  const d = new Date();
+  d.setHours(12,0,0,0);
+  d.setDate(d.getDate()+n);
+  return d;
+}
+
+function notify(message) {
+  const el = document.getElementById("toast");
+  el.textContent = message;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2300);
+}
+
+function renderDashboard() {
+  const habits = scheduled();
+  const completed = habits.filter(h => done(h)).length;
+  const pct = habits.length ? Math.round(completed/habits.length*100) : 0;
+
+  document.getElementById("progressText").textContent =
+    `${completed} of ${habits.length} habits completed`;
+  document.getElementById("progressPct").textContent = pct+"%";
+  document.getElementById("progressBar").style.width = pct+"%";
+  document.getElementById("ringPct").textContent = pct+"%";
+  document.getElementById("habitCount").textContent = data.habits.length;
+
+  document.getElementById("heroTitle").textContent =
+    pct===100 && habits.length ? "You showed up for yourself!" :
+    pct>=50 ? "Look at you, making progress." :
+    "You're building something great.";
+
+  const list = document.getElementById("todayList");
+
+  if (!habits.length) {
+    list.innerHTML = `<div class="panel">No habits scheduled for today. Add a new habit to get started.</div>`;
+    return;
+  }
+
+  list.innerHTML = habits.map(h => `
+    <article class="habit-card">
+      <div class="habit-icon ${h.category.toLowerCase()}">${icons[h.category] || "✦"}</div>
+      <div class="habit-info">
+        <h3>${safe(h.name)}</h3>
+        <p>${safe(h.note || h.category)} · ${streak(h)} day streak</p>
+      </div>
+      <button class="check ${done(h)?"done":""}" data-check="${h.id}"
+        aria-label="Toggle ${safe(h.name)}">${done(h)?"✓":""}</button>
+    </article>
+  `).join("");
+}
+
+function renderManage() {
+  const query = (document.getElementById("searchInput").value || "").toLowerCase().trim();
+  const category = document.getElementById("categoryFilter").value;
+
+  const habits = data.habits.filter(h =>
+    h.name.toLowerCase().includes(query) &&
+    (category==="all" || h.category===category)
+  );
+
+  document.getElementById("emptyState").classList.toggle("hidden", habits.length>0);
+
+  document.getElementById("manageList").innerHTML = habits.map(h => `
+    <article class="manage-card">
+      <div class="manage-top">
+        <div class="habit-icon ${h.category.toLowerCase()}">${icons[h.category] || "✦"}</div>
+        <div class="habit-info">
+          <h3>${safe(h.name)}</h3>
+          <p>${safe(h.category)} · ${safe(h.frequency)}</p>
+        </div>
+      </div>
+      ${h.note ? `<p class="manage-note">${safe(h.note)}</p>` : ""}
+      <div class="manage-actions">
+        <button class="small-btn complete" data-check="${h.id}">
+          ${done(h)?"✓ Completed today":"＋ Check in"}
+        </button>
+        <button class="small-btn" data-edit="${h.id}">Edit</button>
+        <button class="small-btn delete" data-delete="${h.id}">Delete</button>
+      </div>
+    </article>
+  `).join("");
+}
+
+function renderWeek() {
+  let total = 0;
+  const html = [];
+
+  for (let i=-6; i<=0; i++) {
+    const d = offsetDate(i);
+    const count = data.habits.filter(h => done(h,dateString(d))).length;
+    total += count;
+
+    html.push(`
+      <div class="day">
+        <span>${d.toLocaleDateString(undefined,{weekday:"short"}).slice(0,2)}</span>
+        <div class="day-mark ${count?"has":""} ${i===0?"today":""}">
+          ${count?"✓":d.getDate()}
+        </div>
+      </div>
+    `);
+  }
+
+  document.getElementById("weekGrid").innerHTML = html.join("");
+  document.getElementById("weekSummary").textContent =
+    total ? `${total} check-ins this week. Keep it up!` : "Your next small win starts today.";
+}
+
+function renderInsights() {
+  const habits = scheduled();
+  document.getElementById("statToday").textContent = habits.filter(h=>done(h)).length;
+
+  document.getElementById("statStreak").textContent =
+    Math.max(0,...data.habits.map(streak)) + " days";
+
+  document.getElementById("statTotal").textContent =
+    data.habits.reduce((sum,h)=>sum+Object.values(h.logs||{}).filter(Boolean).length,0);
+
+  const days = [];
+  for (let i=-6; i<=0; i++) {
+    const d = offsetDate(i);
+    days.push({
+      label:d.toLocaleDateString(undefined,{weekday:"short"}).slice(0,3),
+      count:data.habits.filter(h=>done(h,dateString(d))).length
+    });
+  }
+
+  const max = Math.max(1,...days.map(d=>d.count));
+
+  document.getElementById("chart").innerHTML = days.map(d=>`
+    <div class="chart-col">
+      <span class="chart-value">${d.count}</span>
+      <div class="chart-track">
+        <div class="chart-bar" style="height:${Math.max(d.count?6:2,d.count/max*100)}%"></div>
+      </div>
+      <span class="chart-day">${d.label}</span>
+    </div>
+  `).join("");
+}
+
+function render() {
+  renderDashboard();
+  renderManage();
+  renderWeek();
+  renderInsights();
+}
+
+function toggleHabit(habitId) {
+  const h = data.habits.find(x=>x.id===habitId);
+  if (!h) return;
+
+  h.logs = h.logs || {};
+  const key = todayKey();
+
+  if (h.logs[key]) {
+    delete h.logs[key];
+    notify("Check-in removed.");
+  } else {
+    h.logs[key] = true;
+    notify("Nice work! One small win collected ✦");
+  }
+
+  save();
+}
+
+function showPage(name) {
+  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+  document.getElementById(name).classList.add("active");
+
+  document.querySelectorAll(".nav").forEach(b =>
+    b.classList.toggle("active",b.dataset.page===name)
+  );
+
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+function openModal(habitId=null) {
+  editing = habitId;
+  const h = data.habits.find(x=>x.id===habitId);
+
+  document.getElementById("habitForm").reset();
+  document.getElementById("modalTitle").textContent = h ? "Edit habit" : "Create a habit";
+  document.getElementById("habitName").value = h?.name || "";
+  document.getElementById("habitCategory").value = h?.category || "Health";
+  document.getElementById("habitFrequency").value = h?.frequency || "Daily";
+  document.getElementById("habitNote").value = h?.note || "";
+  document.getElementById("modal").classList.remove("hidden");
+  document.getElementById("habitName").focus();
+}
+
+function closeModal() {
+  document.getElementById("modal").classList.add("hidden");
+  editing = null;
+}
+
+document.addEventListener("click", e => {
+  const check = e.target.closest("[data-check]");
+  if (check) return toggleHabit(check.dataset.check);
+
+  const edit = e.target.closest("[data-edit]");
+  if (edit) return openModal(edit.dataset.edit);
+
+  const del = e.target.closest("[data-delete]");
+  if (del) {
+    const h = data.habits.find(x=>x.id===del.dataset.delete);
+    if (h && confirm(`Delete "${h.name}" and its check-in history?`)) {
+      data.habits = data.habits.filter(x=>x.id!==h.id);
+      save();
+      notify("Habit deleted.");
+    }
+    return;
+  }
+
+  const nav = e.target.closest("[data-page]");
+  if (nav) return showPage(nav.dataset.page);
+
+  const link = e.target.closest("[data-open]");
+  if (link) showPage(link.dataset.open);
+});
+
+document.getElementById("addTop").addEventListener("click",()=>openModal());
+document.getElementById("addManage").addEventListener("click",()=>openModal());
+document.getElementById("closeModal").addEventListener("click",closeModal);
+document.getElementById("cancelModal").addEventListener("click",closeModal);
+
+document.getElementById("modal").addEventListener("click",e=>{
+  if (e.target.id==="modal") closeModal();
+});
+
+document.addEventListener("keydown",e=>{
+  if (e.key==="Escape") closeModal();
+});
+
+document.getElementById("habitForm").addEventListener("submit",e=>{
+  e.preventDefault();
+
+  const name = document.getElementById("habitName").value.trim();
+  if (!name) return;
+
+  const fields = {
+    name,
+    category:document.getElementById("habitCategory").value,
+    frequency:document.getElementById("habitFrequency").value,
+    note:document.getElementById("habitNote").value.trim()
+  };
+
+  if (editing) {
+    const h = data.habits.find(x=>x.id===editing);
+    if (h) Object.assign(h,fields);
+    notify("Habit updated successfully.");
+  } else {
+    data.habits.push({...fields,id:id(),logs:{}});
+    notify("Your new habit is ready ✦");
+  }
+
+  closeModal();
+  save();
+});
+
+document.getElementById("searchInput").addEventListener("input",renderManage);
+document.getElementById("categoryFilter").addEventListener("change",renderManage);
+
+document.getElementById("newQuote").addEventListener("click",()=>{
+  const current = document.getElementById("quoteText").textContent;
+  const choices = quotes.filter(q=>q!==current);
+  document.getElementById("quoteText").textContent =
+    choices[Math.floor(Math.random()*choices.length)];
+});
+
+document.getElementById("themeBtn").addEventListener("click",()=>{
+  document.body.classList.toggle("dark");
+  try {
+    localStorage.setItem("habitflow_dark",document.body.classList.contains("dark")?"1":"0");
+  } catch(e) {}
+});
+
+document.getElementById("todayDate").textContent =
+  new Date().toLocaleDateString(undefined,{
+    weekday:"long",month:"long",day:"numeric"
+  }).toUpperCase();
+
+try {
+  if (localStorage.getItem("habitflow_dark")==="1") {
+    document.body.classList.add("dark");
+  }
+} catch(e) {}
+
+render();
